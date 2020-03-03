@@ -246,9 +246,10 @@ df_genie <- read_rds(file.path(datain, "MER_Structured_Dataset_GENIESITE_IM_FY18
  # Plot sites where the IP changed
   df_site_tx_clean %>% 
     filter(partner_shift == 1) %>% 
-    select(agency_shift, sitename, fundingagency_lag, primepartner_lag, primepartner, fundingagency, snu1) %>% 
+    select(agency_shift, sitename, fundingagency_lag, primepartner_lag, primepartner, fundingagency, snu1,
+      orgunituid, mech_code, period, agency_shift_type) %>% 
     arrange(agency_shift, fundingagency_lag, primepartner_lag) %>% 
-    prinf()
+  write_csv(., file.path(dataout, "KEN_fundingagency_shifts_sitelevel.csv"))
 
 # BRING IN TARGETS from GENIE pull?
   
