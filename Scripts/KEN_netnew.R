@@ -16,6 +16,7 @@ library(vroom)
 library(keyringr)
 library(llamar)
 library(tidytext)
+library(ggforce)
 
 source(file.path("Scripts", "setup.R"))
 
@@ -158,7 +159,8 @@ source(file.path("Scripts", "setup.R"))
     
     
     #add in partner and mech names
-    df_site_tx_clean <- rename_official(df_site_tx_clean)
+    df_site_tx_clean <- rename_official(df_site_tx_clean) %>% 
+      mutate(primepartner = str_to_title(primepartner))
     
     # #order IPs
     # ip_order <- df_site_tx_clean %>% 
@@ -214,10 +216,9 @@ source(file.path("Scripts", "setup.R"))
         )) %>% 
       group_by(operatingunit, orgunituid) %>% 
       mutate(orgunituid_shift = if_else(agency_shift == 1, 1, NA_real_)) %>% 
-      fill(orgunituid_shift, .direction = c("up")) %>% 
+      fill(orgunituid_shift, .direction = c("up")) %>%
+      fill(agency_shift_type, .direction = c("up")) %>% 
       ungroup()
-      
-    
     
     df_site_tx_clean <- 
       df_site_tx_clean %>% 
@@ -233,31 +234,83 @@ source(file.path("Scripts", "setup.R"))
     spread(period, fundingagency) %>% 
     prinf()
   
-  # Ggplot that df and make a waffle chart
+ # Plot sites where the IP changed
+  df_site_tx_clean %>% 
+    filter(partner_shift == 1) %>% 
+    select(agency_shift, sitename, fundingagency_lag, primepartner_lag, primepartner, fundingagency, snu1) %>% 
+    arrange(agency_shift, fundingagency_lag, primepartner_lag) %>% 
+    prinf()
+
+# BRING IN TARGETS
+  
+  
+  
+# SITE TRANSITION PLOTS ---------------------------------------------------
+  
+  df_site_tx_clean %>% 
+    filter(orgunituid_shift == 1) %>% 
+    group_by(snu1, fundingagency, period) %>% 
+    summarise(n = n()) %>% 
+    ungroup() %>% 
+    group_by(snu1) %>% 
+    mutate(max_n = max(n)) %>% 
+    ungroup() %>% 
+    mutate(snu1_order = fct_reorder(snu1, max_n),
+      snu1_count = ifelse(period =="FY20Q1", n, NA_real_)) %>% 
+    ggplot(aes(x = period, y = snu1_order, fill = fundingagency)) +
+    geom_tile(colour = "white") + 
+    geom_text(aes(label = str_c(snu1_count, " to ", fundingagency)), colour = "white") +
+    theme_minimal() +
+    scale_fill_manual(values = c("#335B8E", "#6CA18F")) +
+    theme(panel.grid.major = element_blank(),
+      strip.text = element_text(hjust = 0),
+      legend.position = "top",
+      legend.justification = c(0, 0),
+      legend.direction = "horizontal") +
+    labs(x = NULL, y = NULL, 
+    title = "Summary of site transitions at the county level")
+    
+  
   df_site_tx_clean %>% 
     filter(orgunituid_shift == 1) %>% 
     group_by(snu1) %>% 
     add_tally() %>% 
     ungroup() %>% 
-    mutate(snu1_order = fct_reorder(snu1, n, .desc = TRUE),
-      site_order = tidytext::reorder_within(sitename, n, snu1_order)) %>% 
+    mutate(snu1_count = ceiling(n / 10),
+      snu1_order = fct_reorder(str_c(snu1, " (", snu1_count, " sites)"), n, .desc = TRUE),
+      site_order = tidytext::reorder_within(sitename, n, snu1_order),
+      ) %>% 
     ggplot(aes(x = period, y = site_order, fill = fundingagency)) +
-    geom_tile(colour = "white") +
-    facet_wrap(~snu1_order, scales = "free_y") +
+    geom_tile(colour = "white")  +
+    ggforce::facet_row(~snu1_order, scales = "free_x", space = "free",
+    labeller = label_wrap_gen(multi_line = FALSE)) +
     #facet_wrap(~snu1_order, ncol = 13) +
     scale_fill_manual(values = c("#335B8E", "#6CA18F")) +
     #scale_fill_viridis_c(option = "D", trans = "log") +
     theme_minimal() + 
     scale_y_reordered() +
-    theme(axis.text = element_text(size = 6))
-
- # Plot sites where the IP changed
-  df_site_tx_clean %>% 
-    filter(partner_shift == 1) %>% 
-    select(sitename, fundingagency_lag, primepartner_lag, primepartner, fundingagency, ) %>% 
-    arrange(fundingagency_lag, primepartner_lag) %>% 
-    prinf()
-
+    theme(axis.text = element_text(size = 6),
+      panel.grid.major = element_blank(),
+      axis.text.x = element_text(angle = 90),
+      strip.text = element_text(hjust = 0),
+      legend.position = "top",
+      legend.justification = c(0, 0),
+      legend.direction = "horizontal") +
+    labs(x = NULL, y = NULL, 
+      title = "Seven counties transitioned from USAID to CDC, six from CDC to USAID",
+      caption = paste0("DATIM Genie API Pull [", format(Sys.Date(), "%Y-%m-%d"), "]"),
+      fill = NULL)
+  
+    ggsave(file.path(graphs, "KEN_site_transition_summary_by_county.pdf"),
+      plot = last_plot(),
+      width = 23.4,
+      height = 16.5,
+      device = "pdf",
+      useDingbats = FALSE, 
+      units = "in"
+      )
+        
+  
   
     
     
@@ -346,7 +399,8 @@ source(file.path("Scripts", "setup.R"))
         ggplot(aes(period, growth, group = fundingagency, color = fundingagency)) +
         geom_hline(yintercept = 0) +
         geom_line(size = 1, na.rm = TRUE) +
-        geom_point(size = 5, na.rm = TRUE) + 
+        geom_point(aes(fill = fundingagency),
+          size = 5, na.rm = TRUE, stroke = 1, colour = "white", shape = 21) + 
         geom_blank(aes(y = placeholder)) +
         geom_text(aes(label = percent(growth, 1), 
           vjust = ifelse(growth < 0, 2, -1)),
@@ -358,6 +412,7 @@ source(file.path("Scripts", "setup.R"))
           "FY19Q1", "", "FY19Q3", "",
           "FY20Q1")) +
         scale_color_manual(values = c("#335B8E", "#6CA18F")) +
+        scale_fill_manual(values = c("#335B8E", "#6CA18F")) +
         facet_grid(fundingagency ~ ., switch = "y") +
         # facet_wrap(~fundingagency, nrow = nrows)
         labs(x = NULL, y = NULL, 
@@ -382,7 +437,7 @@ source(file.path("Scripts", "setup.R"))
     
     #AGENCY UNADJUSTED
     df_site_tx_clean %>% 
-      filter(multi_site_flag != 1) %>% 
+      #filter(multi_site_flag != 1) %>% 
       agg_by(operatingunit, fundingagency) %>% 
       plot_tx(tx_curr, "TX_CURR, unadjusted")
     
@@ -390,17 +445,16 @@ source(file.path("Scripts", "setup.R"))
       dpi = 330, width = 7, height = 3.6)
     
     df_site_tx_clean %>% 
-      filter(multi_site_flag != 1) %>% 
+      #filter(multi_site_flag != 1) %>% 
       agg_by(operatingunit, fundingagency) %>% 
-      plot_tx(tx_net_new, "TX_NET_NEW, unadjusted") +
-      bbc_style()
+      plot_tx(tx_net_new, "TX_NET_NEW, unadjusted") 
     
     ggsave("out/plots/TZA_NNAdj_NETNEW.png",
       dpi = 330, width = 7, height = 3.6)
     
     
     df_site_tx_clean %>%
-      filter(multi_site_flag != 1) %>% 
+      #filter(multi_site_flag != 1) %>% 
       agg_by(operatingunit, fundingagency) %>%
       plot_nn_gr("Growth in TX_NET_NEW, unadjusted")
     
@@ -409,7 +463,7 @@ source(file.path("Scripts", "setup.R"))
     
     #AGENCY REASSIGNED
     df_site_tx_clean %>% 
-      filter(multi_site_flag != 1) %>%  
+      #filter(multi_site_flag != 1) %>%  
       agg_reassign_by(operatingunit, fundingagency) %>% 
       plot_tx(tx_net_new, "TX_NET_NEW, reassigned")
     
@@ -417,16 +471,20 @@ source(file.path("Scripts", "setup.R"))
       dpi = 330, width = 7, height = 3.6)
     
     df_site_tx_clean %>% 
-      filter(multi_site_flag != 1) %>% 
+      #filter(multi_site_flag != 1) %>% 
       agg_reassign_by(operatingunit, fundingagency) %>% 
       plot_nn_gr("Growth in TX_NET_NEW, reassigned")
     
     ggsave("out/plots/TZA_NNAdj_NETNEWADJ_gr.png",
       dpi = 330, width = 7, height = 3.6)
     
-    #PARTNER UNADJUSTED
+
+# TX NN BY PARTNER --------------------------------------------------------
+
+
+  #PARTNER UNADJUSTED
     df_site_tx_clean %>% 
-      filter(multi_site_flag != 1) %>% 
+      #filter(multi_site_flag != 1) %>% 
       agg_by(operatingunit, fundingagency, primepartner) %>% 
       filter(primepartner != "THPS") %>% 
       plot_tx_ip(tx_curr, "TX_CURR, unadjusted")
