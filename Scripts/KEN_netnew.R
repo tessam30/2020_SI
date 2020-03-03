@@ -57,7 +57,16 @@ source(file.path("Scripts", "setup.R"))
   #pull site TX_CURR data
     df_site_tx <- get_datim_targets(url, myuser, yawn) # - 
 
+
+# READ IN GENIE PULL TO GET TARGETS ---------------------------------------
+
+# df_genie <- read_msd(file.path(datain, "MER_Structured_Dataset_GENIESITE_IM_FY18-2020200303.rds"))
     
+df_genie <- read_rds(file.path(datain, "MER_Structured_Dataset_GENIESITE_IM_FY18-2020200303.rds"))  %>%   
+      filter(indicator %in% c("TX_NET_NEW", "TX_CURR", "TX_NEW") & disaggregate == "Total Numerator") %>% 
+      select(orgunituid, sitename, snu1, psnu, psnuuid, dreams, primepartner, fundingagency, mech_code,
+        mech_name, indicator, disaggregate, targets, qtr1, cumulative)
+      
 
 # FUNCTION - AGGREGATE BY -------------------------------------------------
     
@@ -126,7 +135,7 @@ source(file.path("Scripts", "setup.R"))
     df_site_tx_clean <- df_site_tx %>% 
         select(operatingunit = orglvl_3,
             snu1 = orglvl_4,
-            psnu = orglvl_5,
+            orglvl_5 = orglvl_5,
             ward = orglvl_6,
             sitename = `Organisation unit`,
             orgunituid,
@@ -241,7 +250,7 @@ source(file.path("Scripts", "setup.R"))
     arrange(agency_shift, fundingagency_lag, primepartner_lag) %>% 
     prinf()
 
-# BRING IN TARGETS
+# BRING IN TARGETS from GENIE pull?
   
   
   

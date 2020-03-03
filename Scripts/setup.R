@@ -23,4 +23,5 @@ folder_setup()
 
 datain <- "Data"
 dataout <- "Dataout"
+graphs <- "Graphics"
 
