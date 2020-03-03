@@ -14,6 +14,8 @@ library(scales)
 library(extrafont)
 library(vroom)
 library(keyringr)
+library(llamar)
+library(tidytext)
 
 source(file.path("Scripts", "setup.R"))
 
@@ -22,7 +24,7 @@ source(file.path("Scripts", "setup.R"))
   #DATIM Information
     myuser <- "tessam"
     yawn <- decrypt_kc_pw("mydb_access")
-    baseurl <- "https://www.datim.org/"
+    baseurl <- "https://final.datim.org/"
     
     
   #levels in kenya
@@ -38,22 +40,23 @@ source(file.path("Scripts", "setup.R"))
     
   #API url 
     url <- 
-        paste0(baseurl,
-            "api/29/analytics.json?",
-            paste0("dimension=ou:LEVEL-",ou_site_lvl,";",ou_uid,"&"), 
-            "dimension=bw8KHXzxd9i:FPUgmtt8HRi;NLV6dy7BE2O&", #Funding Agency - CDC and USAID
-            "dimension=SH885jaRe0o&", #Funding Mechanism
-            "dimension=pe:2017Q3;2017Q4;2018Q1;2018Q2;2018Q3;2018Q4;2019Q1;2019Q2;2019Q3;2019Q4&",
-            "dimension=LxhLO68FcXm:MvszPTQrUhy&", #technical area: TX_CURR
-            "dimension=IeMmjHyBUpi:Jh0jDM5yQ2E&", #Targets / Results: Results
-            "dimension=RUkVjD3BsS1:PE5QVF0w4xj&",  #Top Level Numerator
-            "displayProperty=SHORTNAME&skipMeta=false&hierarchyMeta=true"
-        )
+      paste0(baseurl,
+        "api/29/analytics.json?",
+        paste0("dimension=ou:LEVEL-",ou_site_lvl,";",ou_uid,"&"), 
+        "dimension=bw8KHXzxd9i:FPUgmtt8HRi;NLV6dy7BE2O&", #Funding Agency - CDC and USAID
+        "dimension=SH885jaRe0o&", #Funding Mechanism
+        "dimension=pe:2017Q3;2017Q4;2018Q1;2018Q2;2018Q3;2018Q4;2019Q1;2019Q2;2019Q3;2019Q4&",
+        "dimension=LxhLO68FcXm:MvszPTQrUhy&", #technical area: TX_CURR
+        "dimension=IeMmjHyBUpi:Jh0jDM5yQ2E&", #Targets / Results: Results
+        "dimension=RUkVjD3BsS1:PE5QVF0w4xj&",  #Top Level Numerator
+        "displayProperty=SHORTNAME&skipMeta=false&hierarchyMeta=true"
+      )#pull site TX_CURR data
     
     
   #pull site TX_CURR data
-    df_site_tx <- get_datim_targets(url, myuser, yawn)
+    df_site_tx <- get_datim_targets(url, myuser, yawn) # - 
 
+    
 
 # FUNCTION - AGGREGATE BY -------------------------------------------------
     
@@ -107,6 +110,15 @@ source(file.path("Scripts", "setup.R"))
     print(df, n = Inf)
   }   
 
+# number of rows for facet
+  facet_rows <- function(df) { 
+    df %>% 
+    distinct(fundingagency) %>% 
+    count() %>% 
+    pull()
+  }
+  
+  
 # MUNGE -------------------------------------------------------------------
     
     #keep select vars, drop "county" from county names, flag transition counties
@@ -141,7 +153,8 @@ source(file.path("Scripts", "setup.R"))
     #clean agencies
     df_site_tx_clean <- df_site_tx_clean %>% 
         mutate(fundingagency = str_remove(fundingagency, "HHS/"),
-            fundingagency = factor(fundingagency, c("CDC","USAID", "DOD")))
+            fundingagency = factor(fundingagency, c("CDC","USAID", "DOD"))) %>% 
+      mutate(exclude_id = str_c(orgunituid, fundingagency, mech_code, period, tx_curr))
     
     
     #add in partner and mech names
@@ -169,20 +182,93 @@ source(file.path("Scripts", "setup.R"))
       filter(orgunituid %in% multi_partner_sites) %>%
       arrange(orgunituid, period, mech_code)
    
-      
-    write_csv(., file.path(dataout, "KEN_multi_partner_sites.csv"))
+# Exclude list below - derived from the mp_sites_df.
+    mp_site_exclude <- 
+    c("KATAw2bTliQCDC18208FY17Q42", "KATAw2bTliQCDC18208FY18Q15", "KATAw2bTliQCDC18208FY18Q26", 
+      "KATAw2bTliQCDC18208FY18Q310", "KATAw2bTliQCDC18208FY18Q418", "krgRLpGbbJoCDC18213FY18Q1191", 
+      "krgRLpGbbJoCDC18213FY18Q2202", "oof4zfbHoBNCDC18208FY17Q415", "oof4zfbHoBNCDC18208FY18Q114", 
+      "oof4zfbHoBNCDC18208FY18Q214", "oof4zfbHoBNCDC18208FY18Q316", "oof4zfbHoBNCDC18208FY18Q424", 
+      "Q02fJEYmyViCDC18213FY18Q1141", "Q02fJEYmyViCDC18213FY18Q2163", "Q02fJEYmyViCDC18213FY18Q3157", 
+      "r9xVGmSAMepUSAID14012FY19Q251", "t5RWBPDPDxqCDC18213FY18Q216", "zMtC3WJjCYACDC18213FY18Q2103") 
     
-# Flagging sites with multiple partners
+    write_csv(mp_sites_df, file.path(dataout, "KEN_multi_partner_sites_2020_03_02.csv"))
+    
+# Flag sites where there was an agency shift between FY19Q4 and FY20Q1
+  # folding in AMREF
     df_site_tx_clean <- 
       df_site_tx_clean %>% 
-      mutate(multi_site_flag = if_else(orgunituid %in% multi_partner_sites, 1, 0))
+      mutate(multi_site_flag = if_else(orgunituid %in% multi_partner_sites, 1, 0)) %>% 
+      group_by(operatingunit, orgunituid) %>% 
+      mutate(fundingagency_lag = lag(fundingagency, n = 1, order_by = period),
+        primepartner_lag = lag(primepartner, n = 1, order_by = period)) %>% 
+      ungroup() %>% 
+      arrange(operatingunit, orgunituid, period) %>% 
+      mutate(agency_shift = if_else(period == "FY20Q1" & fundingagency != fundingagency_lag, 1, 0),
+        partner_shift = if_else(period == "FY20Q1" & primepartner != primepartner_lag, 1, 0),
+        agency_shift_type = case_when(
+        agency_shift == 1 & period == "FY20Q1" ~ str_c("from ", fundingagency_lag, " to ", fundingagency),
+          TRUE ~ NA_character_ 
+        ),
+        parnter_shift_type = case_when(
+          partner_shift == 1 & period == "FY20Q1" ~ str_c("from", primepartner_lag, " to ", primepartner)
+        )) %>% 
+      group_by(operatingunit, orgunituid) %>% 
+      mutate(orgunituid_shift = if_else(agency_shift == 1, 1, NA_real_)) %>% 
+      fill(orgunituid_shift, .direction = c("up")) %>% 
+      ungroup()
+      
+    
+    
+    df_site_tx_clean <- 
+      df_site_tx_clean %>% 
+      filter(!exclude_id %in% mp_site_exclude) %>% 
+      # Collapsing on occurence where an IP should have been given credit for 36 more (check on this>?!)
+      mutate(tx_curr = if_else(exclude_id == "y1337MIdqZGUSAID14012FY18Q1179", tx_curr + 36, tx_curr)) %>% 
+      filter(exclude_id != "y1337MIdqZGUSAID14022FY18Q136")
+    
+  # Show a summary of sites that switched from USAID to CDC and vice versa
+  df_site_tx_clean %>% 
+    filter(orgunituid_shift == 1) %>% 
+    select(sitename, fundingagency, period) %>% 
+    spread(period, fundingagency) %>% 
+    prinf()
+  
+  # Ggplot that df and make a waffle chart
+  df_site_tx_clean %>% 
+    filter(orgunituid_shift == 1) %>% 
+    group_by(snu1) %>% 
+    add_tally() %>% 
+    ungroup() %>% 
+    mutate(snu1_order = fct_reorder(snu1, n, .desc = TRUE),
+      site_order = tidytext::reorder_within(sitename, n, snu1_order)) %>% 
+    ggplot(aes(x = period, y = site_order, fill = fundingagency)) +
+    geom_tile(colour = "white") +
+    facet_wrap(~snu1_order, scales = "free_y") +
+    #facet_wrap(~snu1_order, ncol = 13) +
+    scale_fill_manual(values = c("#335B8E", "#6CA18F")) +
+    #scale_fill_viridis_c(option = "D", trans = "log") +
+    theme_minimal() + 
+    scale_y_reordered() +
+    theme(axis.text = element_text(size = 6))
 
+ # Plot sites where the IP changed
+  df_site_tx_clean %>% 
+    filter(partner_shift == 1) %>% 
+    select(sitename, fundingagency_lag, primepartner_lag, primepartner, fundingagency, ) %>% 
+    arrange(fundingagency_lag, primepartner_lag) %>% 
+    prinf()
+
+  
+    
+    
 # FUNCTION - PLOT TX ------------------------------------------------------
     
     plot_tx <- function(df, var, title){
       
       if("fundingagency_adj" %in% names(df))
         df <- mutate(df, fundingagency = fundingagency_adj)
+      
+      nrows <- facet_rows(df)
       
       df %>% 
         mutate(placeholder = {{var}} * 1.2) %>% 
@@ -200,13 +286,13 @@ source(file.path("Scripts", "setup.R"))
           "FY19Q1", "", "FY19Q3", "",
           "FY20Q1")) +
         scale_fill_manual(values = c("#335B8E", "#6CA18F")) +
-        facet_grid(fundingagency ~ ., switch = "y") +
+        facet_wrap(~ fundingagency, nrow = nrows) +
         labs(x = NULL, y = NULL, 
           title = title,
           caption = paste0("DATIM Genie API Pull [", format(Sys.Date(), "%Y-%m-%d"), "]")) +
         theme_minimal() +
         theme(text = element_text(family = "Franklin Gothic Medium Cond"),
-          strip.text = element_text(size = 14),
+          strip.text = element_text(size = 14, hjust = 0),
           axis.text.y = element_blank(),
           panel.grid.major.x = element_blank(),
           plot.title = element_text(family = "Franklin Gothic Medium"),
@@ -250,10 +336,8 @@ source(file.path("Scripts", "setup.R"))
     
     plot_nn_gr <- function(df, title){
       
-      nrows <- df %>% 
-        distinct(fundingagency) %>% 
-        count() %>% pull()
-      
+      nrows <- facet_rows(df)
+        
       df %>% 
         group_by(fundingagency) %>% 
         mutate(growth = tx_net_new/lag(tx_net_new)) %>% 
@@ -292,6 +376,8 @@ source(file.path("Scripts", "setup.R"))
     
     
     # PLOT TX TRENDS ----------------------------------------------------------
+    # Stopped here
+    
     
     
     #AGENCY UNADJUSTED
