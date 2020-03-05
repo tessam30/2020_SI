@@ -252,8 +252,22 @@ df_genie <- read_rds(file.path(datain, "MER_Structured_Dataset_GENIESITE_IM_FY18
   write_csv(., file.path(dataout, "KEN_fundingagency_shifts_sitelevel.csv"))
 
 # BRING IN TARGETS from GENIE pull?
-  
-  
+#   
+df_targets <- 
+  df_genie %>% 
+  filter(indicator == "TX_CURR" & mech_name != "Dedup") %>% 
+  mutate(tx_curr_tgt = targets,
+    period = "FY20Q1",
+    fundingagency = str_remove(fundingagency, "HHS/"),
+      fundingagency = factor(fundingagency, c("CDC","USAID", "DOD"))) %>% 
+  select(orgunituid, sitename, dreams, mech_code, mech_name, fundingagency,
+    tx_curr_tgt, period) 
+
+df_site_tx_tgts <- df_site_tx_clean %>%
+  left_join(., df_targets, by = c("orgunituid", "mech_code", "period")) 
+
+
+
   
 # SITE TRANSITION PLOTS ---------------------------------------------------
   
